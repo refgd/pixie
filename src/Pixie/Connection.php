@@ -24,7 +24,7 @@ class Connection
     /**
      * @var \PDO
      */
-    protected $pdoInstance;
+    protected $pdoInstances;
 
     /**
      * @var Connection
@@ -48,7 +48,7 @@ class Connection
 
         $this->container = $container;
 
-        $this->setAdapter($adapter)->setAdapterConfig($adapterConfig)->connect();
+        $this->setAdapter($adapter)->setAdapterConfig($adapterConfig);
 
         // Create event dependency
         $this->eventHandler = $this->container->build('\\Pixie\\EventHandler');
@@ -82,21 +82,22 @@ class Connection
     /**
      * Create the connection adapter
      */
-    protected function connect()
+    protected function connect($config)
     {
         // Build a database connection if we don't have one connected
 
-        $adapter = '\\Pixie\\ConnectionAdapters\\' . ucfirst(strtolower($this->adapter));
+        $adapter = '\\Pixie\\ConnectionAdapters\\' . $this->adapter;
 
         $adapterInstance = $this->container->build($adapter, array($this->container));
 
-        $pdo = $adapterInstance->connect($this->adapterConfig);
-        $this->setPdoInstance($pdo);
+        $pdo = $adapterInstance->connect($config);
 
         // Preserve the first database connection with a static property
         if (!static::$storedConnection) {
             static::$storedConnection = $this;
         }
+
+        return $pdo;
     }
 
     /**
@@ -104,18 +105,31 @@ class Connection
      *
      * @return $this
      */
-    public function setPdoInstance(\PDO $pdo)
+    public function setPdoInstance(\PDO $pdo, $sql_type = 'master')
     {
-        $this->pdoInstance = $pdo;
+        $this->pdoInstances[$sql_type] = $pdo;
         return $this;
     }
 
     /**
      * @return \PDO
      */
-    public function getPdoInstance()
+    public function getPdoInstance($sql_type = 'master')
     {
-        return $this->pdoInstance;
+        if(!isset($this->pdos[$sql_type])){
+            if($sql_type == 'master'){
+                $this->pdoInstances[$sql_type] = $this->connect($this->adapterConfig);
+            }else if($this->adapter == 'Sqlite' || empty($this->adapterConfig[$sql_type])){
+                $this->pdoInstances[$sql_type] = $this->getPdoInstance();
+            }else{
+                $hosts = $this->adapterConfig[$sql_type];
+                if(!is_array($hosts)) $hosts = [$hosts];
+
+                $this->pdoInstances[$sql_type] = $this->connect(array_merge($this->adapterConfig, ['host'=>$hosts[array_rand($hosts)]]));
+            }
+        }
+
+        return $this->pdoInstances[$sql_type];
     }
 
     /**
@@ -125,7 +139,7 @@ class Connection
      */
     public function setAdapter($adapter)
     {
-        $this->adapter = $adapter;
+        $this->adapter = ucfirst(strtolower($adapter));
         return $this;
     }
 

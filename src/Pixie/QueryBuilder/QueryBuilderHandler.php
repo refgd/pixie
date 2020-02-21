@@ -23,9 +23,9 @@ class QueryBuilderHandler
     protected $statements = array();
 
     /**
-     * @var PDO
+     * @var PDOs
      */
-    protected $pdo;
+    protected $pdos = array();
 
     /**
      * @var null|PDOStatement
@@ -65,7 +65,6 @@ class QueryBuilderHandler
 
         $this->connection = $connection;
         $this->container = $this->connection->getContainer();
-        $this->pdo = $this->connection->getPdoInstance();
         $this->adapter = $this->connection->getAdapter();
         $this->adapterConfig = $this->connection->getAdapterConfig();
 
@@ -80,8 +79,6 @@ class QueryBuilderHandler
             '\\Pixie\\QueryBuilder\\Adapters\\' . ucfirst($this->adapter),
             array($this->connection)
         );
-
-        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     }
 
     /**
@@ -141,10 +138,10 @@ class QueryBuilderHandler
      *
      * @return array PDOStatement and execution time as float
      */
-    public function statement($sql, $bindings = array())
+    public function statement($sql, $bindings = array(), $sql_type = 'master')
     {
         $start = microtime(true);
-        $pdoStatement = $this->pdo->prepare($sql);
+        $pdoStatement = $this->getPdo($sql_type)->prepare($sql);
         foreach ($bindings as $key => $value) {
             $pdoStatement->bindValue(
                 is_int($key) ? $key + 1 : $key,
@@ -171,10 +168,11 @@ class QueryBuilderHandler
 
         $executionTime = 0;
         if (is_null($this->pdoStatement)) {
-            $queryObject = $this->getQuery('select');
+            $queryObject = $this->getQuery('select', null, 'slave');
             list($this->pdoStatement, $executionTime) = $this->statement(
                 $queryObject->getSql(),
-                $queryObject->getBindings()
+                $queryObject->getBindings(),
+                'slave'
             );
         }
 
@@ -278,7 +276,7 @@ class QueryBuilderHandler
      * @return mixed
      * @throws Exception
      */
-    public function getQuery($type = 'select', $dataToBePassed = array())
+    public function getQuery($type = 'select', $dataToBePassed = array(), $sql_type = 'master')
     {
         $allowedTypes = array('select', 'insert', 'insertignore', 'replace', 'delete', 'update', 'criteriaonly');
         if (!in_array(strtolower($type), $allowedTypes)) {
@@ -289,7 +287,7 @@ class QueryBuilderHandler
 
         return $this->container->build(
             '\\Pixie\\QueryBuilder\\QueryObject',
-            array($queryArr['sql'], $queryArr['bindings'], $this->pdo)
+            array($queryArr['sql'], $queryArr['bindings'], $this->getPdo($sql_type))
         );
     }
 
@@ -328,7 +326,7 @@ class QueryBuilderHandler
 
             list($result, $executionTime) = $this->statement($queryObject->getSql(), $queryObject->getBindings());
 
-            $return = $result->rowCount() === 1 ? $this->pdo->lastInsertId() : null;
+            $return = $result->rowCount() === 1 ? $this->getPdo()->lastInsertId() : null;
         } else {
             // Its a batch insert
             $return = array();
@@ -340,7 +338,7 @@ class QueryBuilderHandler
                 $executionTime += $time;
 
                 if ($result->rowCount() === 1) {
-                    $return[] = $this->pdo->lastInsertId();
+                    $return[] = $this->getPdo()->lastInsertId();
                 }
             }
         }
@@ -816,7 +814,7 @@ class QueryBuilderHandler
     {
         try {
             // Begin the PDO transaction
-            $this->pdo->beginTransaction();
+            $this->getPdo()->beginTransaction();
 
             // Get the Transaction class
             $transaction = $this->container->build('\\Pixie\\QueryBuilder\\Transaction', array($this->connection));
@@ -826,7 +824,7 @@ class QueryBuilderHandler
 
             // If no errors have been thrown or the transaction wasn't completed within
             // the closure, commit the changes
-            $this->pdo->commit();
+            $this->getPdo()->commit();
 
             return $this;
         } catch (TransactionHaltException $e) {
@@ -834,7 +832,7 @@ class QueryBuilderHandler
             return $this;
         } catch (\Exception $e) {
             // something happened, rollback changes
-            $this->pdo->rollBack();
+            $this->getPdo()->rollBack();
             return $this;
         }
     }
@@ -898,7 +896,21 @@ class QueryBuilderHandler
      */
     public function pdo()
     {
-        return $this->pdo;
+        return $this->getPdo();
+    }
+
+    /**
+     * Return PDO instance
+     *
+     * @return PDO
+     */
+    protected function getPdo($sql_type = 'master')
+    {
+        if(!isset($this->pdos[$sql_type])){
+            $this->pdos[$sql_type] = $this->connection->getPdoInstance($sql_type);
+            $this->pdos[$sql_type]->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        }
+        return $this->pdos[$sql_type];
     }
 
     /**

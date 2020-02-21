@@ -10,7 +10,7 @@ class Transaction extends QueryBuilderHandler
      */
     public function commit()
     {
-        $this->pdo->commit();
+        $this->getPdo()->commit();
         throw new TransactionHaltException();
     }
 
@@ -19,7 +19,7 @@ class Transaction extends QueryBuilderHandler
      */
     public function rollback()
     {
-        $this->pdo->rollBack();
+        $this->getPdo()->rollBack();
         throw new TransactionHaltException();
     }
 }
