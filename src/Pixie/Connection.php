@@ -24,7 +24,7 @@ class Connection
     /**
      * @var \PDO
      */
-    protected $pdoInstances;
+    protected $pdoInstances = [];
 
     /**
      * @var Connection
@@ -116,7 +116,7 @@ class Connection
      */
     public function getPdoInstance($sql_type = 'master')
     {
-        if(!isset($this->pdos[$sql_type])){
+        if(!isset($this->pdoInstances[$sql_type])){
             if($sql_type == 'master'){
                 $this->pdoInstances[$sql_type] = $this->connect($this->adapterConfig);
             }else if($this->adapter == 'Sqlite' || empty($this->adapterConfig[$sql_type])){
